@@ -2,62 +2,78 @@
 
 namespace club {
 
-Club::Club(Path inputPath) {
-    File file{inputPath};
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file");
+void Club::Run(File& file, OStream& output) {
+    Line line;
+    Line remaining;
+    ILineStream lineStream;
+
+    std::getline(file, line);
+    lineStream = ILineStream(line);
+    if (!(lineStream >> tablesNum_) || tablesNum_ <= 0 || (lineStream >> remaining)) {
+        throw std::invalid_argument(line);
     }
-    if (!(file >> tablesNum_ >> workDayStart_ >> workDayEnd_ >> hourCost_)) {
-        throw std::invalid_argument("Error. Incorrect settings");
+
+    std::getline(file, line);
+    lineStream = ILineStream(line);
+    if (!(lineStream >> workDayStart_ >> workDayEnd_) || (lineStream >> remaining)) {
+        throw std::invalid_argument(line);
     }
+
+    std::getline(file, line);
+    lineStream = ILineStream(line);
+    if (!(lineStream >> hourCost_) || hourCost_ <= 0 || (lineStream >> remaining)) {
+        throw std::invalid_argument(line);
+    }
+
     tables_ = std::vector<Table>(tablesNum_, Table(hourCost_));
-    RunEvents(file);
+
+    OLineStream buffer;
+    HandleEvents(file, buffer);
+    output << buffer.str();
 }
 
-void Club::RunEvents(File& file) {
-    using Line = std::string;
-    using LineStream = std::istringstream;
-
-    std::cout << workDayStart_ << "\n";
+void Club::HandleEvents(File& file, OLineStream& oss) {
+    oss << workDayStart_ << "\n";
 
     Line line;
-    std::getline(file, line);
+    Line remaining;
+    ILineStream lineStream;
     while (std::getline(file, line)) {
-        LineStream lineStream(line);
+        lineStream = ILineStream(line);
         Event ev(tablesNum_);
-        if (!(lineStream >> ev)) {
+        if (!(lineStream >> ev) || (lineStream >> remaining)) {
             throw std::invalid_argument(line);
         }
-        HandleEvent(ev);
+        HandleEvent(ev, oss);
     }
 
-    HandleLastUsers();
-    std::cout << workDayEnd_ << "\n";
-    PrintIncome();
+    HandleLastUsers(oss);
+    oss << workDayEnd_ << "\n";
+    PrintIncome(oss);
 }
 
-void Club::HandleEvent(const Event& ev) {
-    Event retEv;
+void Club::HandleEvent(const Event& ev, OLineStream& oss) {
+    Event newEv;
     switch (ev.id) {
         case 1:
-            retEv = HandleClientArrived(ev);
+            newEv = NewClientArrived(ev);
             break;
         case 2:
-            retEv = HandleSitAtTable(ev);
+            newEv = NewSitAtTable(ev);
             break;
         case 3:
-            retEv = HandleClientWaiting(ev);
+            newEv = NewClientWaiting(ev);
             break;
         case 4:
-            retEv = HandleClientLeaving(ev);
+            newEv = NewClientLeaving(ev);
             break;
         default:
             break;
     }
-    std::cout << ev << retEv;
+    oss << ev << newEv;
 }
 
-Event Club::HandleClientArrived(const Event& ev) {  // <время> 1 <имя клиента>
+Event Club::NewClientArrived(const Event& ev) {  // <время> 1 <имя клиента>
     Event retEv;
     if (!ev.time.In(workDayStart_, workDayEnd_)) {
         retEv = Event::Error(ev.time, "NotOpenYet");
@@ -71,7 +87,7 @@ Event Club::HandleClientArrived(const Event& ev) {  // <время> 1 <имя к
     return retEv;
 }
 
-Event Club::HandleSitAtTable(const Event& ev) {  // <время> 2 <имя клиента> <номер стола>
+Event Club::NewSitAtTable(const Event& ev) {  // <время> 2 <имя клиента> <номер стола>
     Event retEv;
     if (users_.find(ev.name) == users_.end()) {
         retEv = Event::Error(ev.time, "ClientUnknown");
@@ -83,10 +99,11 @@ Event Club::HandleSitAtTable(const Event& ev) {  // <время> 2 <имя кл�
     }
     if (users_[ev.name].status == Status::AtTable) {
         --busyTables_;
-        tables_[users_[ev.name].table.value()].StopSession(ev.time);
+        TableIndex tableIndex = users_[ev.name].table.value();
+        tables_[tableIndex].StopSession(ev.time);
     }
     if (users_[ev.name].status == Status::InQueue) {
-        queue_.erase(users_[ev.name].placeInQueue.value());
+        LeaveQueue(ev.name);
     }
     ++busyTables_;
     tables_[ev.tableNum].StartSession(ev.time);
@@ -94,13 +111,13 @@ Event Club::HandleSitAtTable(const Event& ev) {  // <время> 2 <имя кл�
     return retEv;
 }
 
-Event Club::HandleClientWaiting(const Event& ev) {  // <время> 3 <имя клиента>
+Event Club::NewClientWaiting(const Event& ev) {  // <время> 3 <имя клиента>
     Event retEv;
     if (busyTables_ < tablesNum_) {
         retEv = Event::Error(ev.time, "ICanWaitNoLonger!");
         return retEv;
     }
-    if (queue_.size() > tablesNum_) {
+    if (queue_.size() >= tablesNum_) {
         retEv = Event::ClientLeaving(ev.time, ev.name);
         users_.erase(ev.name);
         return retEv;
@@ -110,7 +127,7 @@ Event Club::HandleClientWaiting(const Event& ev) {  // <время> 3 <имя к
     return retEv;
 }
 
-Event Club::HandleClientLeaving(const Event& ev) {  // <время> 4 <имя клиента>
+Event Club::NewClientLeaving(const Event& ev) {  // <время> 4 <имя клиента>
     Event retEv;
     if (users_.find(ev.name) == users_.end()) {
         retEv = Event::Error(ev.time, "ClientUnknown");
@@ -118,10 +135,11 @@ Event Club::HandleClientLeaving(const Event& ev) {  // <время> 4 <имя к
     }
     if (users_[ev.name].status == Status::AtTable) {
         --busyTables_;
-        tables_[users_[ev.name].table.value()].StopSession(ev.time);
+        TableIndex tableIndex = users_[ev.name].table.value();
+        tables_[tableIndex].StopSession(ev.time);
     }
     if (users_[ev.name].status == Status::InQueue) {
-        queue_.erase(users_[ev.name].placeInQueue.value());
+        LeaveQueue(ev.name);
     }
     users_.erase(ev.name);
     if (busyTables_ < tablesNum_ && queue_.size() > 0) {
@@ -138,7 +156,7 @@ Event Club::HandleClientLeaving(const Event& ev) {  // <время> 4 <имя к
     return retEv;
 }
 
-void Club::HandleLastUsers() {
+void Club::HandleLastUsers(OLineStream& oss) {
     for (size_t i = 0; i < tables_.size(); ++i) {
         tables_[i].StopSession(workDayEnd_);
     }
@@ -150,16 +168,16 @@ void Club::HandleLastUsers() {
     std::sort(usersInClub.begin(), usersInClub.end());
 
     for (size_t i = 0; i < usersInClub.size(); ++i) {
-        Event retEv = Event::ClientLeaving(workDayEnd_, usersInClub[i]);
-        std::cout << retEv;
+        Event newEv = Event::ClientLeaving(workDayEnd_, usersInClub[i]);
+        oss << newEv;
     }
 
     users_.clear();
 }
 
-void Club::PrintIncome() {
+void Club::PrintIncome(OLineStream& oss) {
     for (size_t i = 0; i < tables_.size(); ++i) {
-        std::cout << i + 1 << " " << tables_[i].income << " " << tables_[i].timeInUse << "\n";
+        oss << i + 1 << " " << tables_[i].income << " " << tables_[i].timeInUse << "\n";
     }
 }
 
@@ -172,6 +190,10 @@ TableIndex Club::FindFreeTable() const {
         ++tableNum;
     }
     return tableNum;
+}
+
+void Club::LeaveQueue(Username name) {
+    queue_.erase(users_[name].placeInQueue.value());
 }
 
 }  // namespace club

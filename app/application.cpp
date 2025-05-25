@@ -12,7 +12,14 @@ void Application::Run(int argc, char* argv[]) {
             "Error. Too many arguments. Only path to the input file is required");
     }
     Path inputPath = argv[1];
-    Club club(inputPath);
+
+    File file{inputPath};
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file");
+    }
+
+    Club club;
+    club.Run(file);
 }
 
 }  // namespace club

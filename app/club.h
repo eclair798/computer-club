@@ -53,22 +53,30 @@ struct UserState {
 class Club {
     using Path = std::filesystem::path;
     using File = std::ifstream;
+    using OStream = std::ostream;
+    using Line = std::string;
+    using ILineStream = std::istringstream;
+    using OLineStream = std::ostringstream;
 
 public:
-    Club(Path inputPath);
+    Club() = default;
 
-    void RunEvents(File& file);
+    void Run(File& file, OStream& output = std::cout);
 
-    void HandleEvent(const Event& ev);
-    Event HandleClientArrived(const Event& ev);
-    Event HandleSitAtTable(const Event& ev);
-    Event HandleClientWaiting(const Event& ev);
-    Event HandleClientLeaving(const Event& ev);
+    void HandleEvents(File& file, OLineStream& output);
+    void HandleEvent(const Event& ev, OLineStream& output);
 
-    void HandleLastUsers();
-    void PrintIncome();
+    Event NewClientArrived(const Event& ev);
+    Event NewSitAtTable(const Event& ev);
+    Event NewClientWaiting(const Event& ev);
+    Event NewClientLeaving(const Event& ev);
+
+    void HandleLastUsers(OLineStream& oss);
+    void PrintIncome(OLineStream& oss);
 
     TableIndex FindFreeTable() const;
+
+    void LeaveQueue(Username name);
 
 private:
     TableIndex tablesNum_;

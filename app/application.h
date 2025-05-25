@@ -8,6 +8,7 @@ namespace club {
 
 class Application {
     using Path = std::filesystem::path;
+    using File = std::ifstream;
 
 public:
     static void Run(int argc, char *argv[]);

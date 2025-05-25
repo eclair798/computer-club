@@ -33,8 +33,11 @@
 
 cmake-build-*
 build*
+build
 
 .idea
 .idea*
 
 .vscode
+
+temp
